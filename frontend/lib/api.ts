@@ -13,19 +13,32 @@ export class ApiUnavailable extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${BASE_URL}${path}`, { cache: "no-store" });
-  } catch (error) {
-    throw new ApiUnavailable(path, error);
-  }
-  if (!response.ok) {
-    throw new Error(`${path} -> ${response.status} ${await response.text()}`);
-  }
-  return (await response.json()) as T;
+async function get<T>(path: string, retries = 25): Promise<T> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+          try {
+                  const response = await fetch(`${BASE_URL}${path}`, { cache: "no-store" });
+                  if (response.ok) {
+                            return (await response.json()) as T;
+                  }
+                  if (attempt < retries && (response.status === 502 || response.status === 503 || response.status === 504 || response.status === 500)) {
+                            await new Promise((resolve) => setTimeout(resolve, 2500));
+                            continue;
+                  }
+                  if (attempt === retries) {
+                            throw new Error(`${path} -> ${response.status} ${await response.text()}`);
+                  }
+          } catch (error) {
+                  lastError = error;
+                  if (attempt < retries) {
+                            await new Promise((resolve) => setTimeout(resolve, 2500));
+                            continue;
+                  }
+                  throw new ApiUnavailable(path, error);
+          }
+    }
+    throw new ApiUnavailable(path, lastError ?? new Error("Max retries reached"));
 }
-
 // -- types (only the fields the Portal renders) ------------------------------ //
 
 export interface AssessmentSummary {
